@@ -78,4 +78,21 @@ internal static partial class CodeGenerator
             """
         );
     }
+    
+    static string GenerateAnonymousEnum(string enumName, List<(string name, long? value)> constants)
+    {
+        var builder = new StringBuilder();
+        builder.AppendLine($"public enum {enumName} {{");
+        foreach (var (name, maybeValue) in constants)
+        {
+            builder.AppendLine(maybeValue switch
+            {
+                { } value => $"{TAB1}{name} = {value},",
+                null => $"{TAB1}{name},",
+            });
+        }
+        
+        builder.AppendLine("}");
+        return builder.ToString();
+    }
 }

@@ -11,7 +11,8 @@ namespace GDExtensionAPIGenerator;
 
 internal static partial class CodeGenerator
 {
-    internal static IReadOnlyList<(string fileName, string fileContent)> GenerateWrappersForGDETypes(string[] gdeTypeNames, ICollection<string> godotBuiltinTypeNames)
+    internal static List<(string typeName, string fileContent)> GenerateWrappersForGDETypes(string[] gdeTypeNames,
+        ICollection<string> godotBuiltinTypeNames)
     {
         // Certain types are named differently in C#,
         // such as GodotObject(C#) vs Object(Native),
@@ -30,7 +31,7 @@ internal static partial class CodeGenerator
             GenerateClassInheritanceMap(gdeTypeName, classInheritanceMap);
         }
 
-        var generateTasks = new Task<(string, string)>[gdeTypeNames.Length];
+        var generateTasks = new Task<(string, string, List<CodeGenerator.GdType.EnumConstants>)>[gdeTypeNames.Length];
 
         var nonGdeTypes = new List<string>();
         foreach (var gdeNameCandidate in classInheritanceMap.Keys)
@@ -71,14 +72,32 @@ internal static partial class CodeGenerator
             );
         }
         
-        var generated = Task.WhenAll(generateTasks).Result.ToList();
+        var results = Task.WhenAll(generateTasks).Result;
+
+        var generated = new List<(string typeName, string code)>();
+        var allEnums = new Dictionary<string, List<(string constantName, long? value)>>();
+
+        foreach (var (typeName, code, enums) in results)
+        {
+            generated.Add((typeName, code));
+
+            foreach (var (name, constants) in enums) 
+                allEnums[name] = constants;
+        }
+            
         generated.Add(GenerateStaticHelper());
+
+        foreach (var (enumName, constants) in allEnums)
+        {
+            var code = GenerateAnonymousEnum(enumName, constants);
+            generated.Add((enumName, code));
+        }
 
         PopulateBuiltinEnumTypes(enumNameToConstantMap);
 
         var span = CollectionsMarshal.AsSpan(generated);
 
-        foreach (ref (string FileName, string Code) data in span)
+        foreach (ref (string _, string Code) data in span)
         {
             data.Code = GetExtractUnResolvedEnumValueRegex().Replace(
                 data.Code,
@@ -105,8 +124,7 @@ internal static partial class CodeGenerator
         return generated;
     }
 
-
-    private const string STATIC_HELPER_CLASS = "GDExtensionHelper";
+    private const string STATIC_HELPER = "GDExtensionHelper";
 
     private static (string, string) GenerateStaticHelper()
     {
@@ -118,7 +136,7 @@ internal static partial class CodeGenerator
             using System.Collections.Concurrent;
             using Godot;
             
-            public static class {{STATIC_HELPER_CLASS}}
+            public static class {{STATIC_HELPER}}
             {
                 private static readonly ConcurrentDictionary<string, GodotObject> _instances = [];
                 private static readonly ConcurrentDictionary<Type,Variant> _scripts = [];
@@ -144,7 +162,7 @@ internal static partial class CodeGenerator
                 /// <remarks>The developer should only supply the <paramref name="godotObject"/> that represents the correct underlying GDExtension type.</remarks>
                 /// <param name="godotObject">The <paramref name="godotObject"/> that represents the correct underlying GDExtension type.</param>
                 /// <returns>The existing or a new instance of the <typeparamref name="T"/> wrapper script attached to the supplied <paramref name="godotObject"/>.</returns>
-                public static T {{VariantToInstanceMethodName}}<T>(GodotObject godotObject) where T : GodotObject
+                public static T {{MethodBind}}<T>(GodotObject godotObject) where T : GodotObject
                 {
             #if DEBUG
                     if (!GodotObject.IsInstanceValid(godotObject)) throw new ArgumentException(nameof(godotObject),"The supplied GodotObject is not valid.");
@@ -155,10 +173,18 @@ internal static partial class CodeGenerator
                     var className = godotObject.GetClass();
                     if (!ClassDB.IsParentClass(type.Name, className)) throw new ArgumentException(nameof(godotObject),$"The supplied GodotObject {className} is not a {type.Name}.");
             #endif
-                    var script =_scripts.GetOrAdd(type,GetScriptFactory);
-                    var instanceId = godotObject.GetInstanceId();
-                    godotObject.SetScript(script);
-                    return (T)GodotObject.InstanceFromId(instanceId);
+                    // Abstract classes cannot be scripts.
+                    if (type.IsAbstract)
+                    {
+                        GD.PrintErr($"Abstract class {type} cannot be a script.");
+                        return null;
+                    } else
+                    {
+                        var script = _scripts.GetOrAdd(type, GetScriptFactory);
+                        var instanceId = godotObject.GetInstanceId();
+                        godotObject.SetScript(script);
+                        return (T)GodotObject.InstanceFromId(instanceId);
+                    }
                 }
                 
                 private static Variant GetScriptFactory(Type type)
@@ -167,23 +193,23 @@ internal static partial class CodeGenerator
                     return scriptPath is null ? null : ResourceLoader.Load(scriptPath.Path);
                 }
             
-                public static Godot.Collections.Array<T> Cast<[MustBeVariant]T>(Godot.Collections.Array<GodotObject> godotObjects) where T : GodotObject
+                public static Godot.Collections.Array<T> {{MethodCast}}<[MustBeVariant]T>(Godot.Collections.Array<GodotObject> godotObjects) where T : GodotObject
                 {
-                    return new Godot.Collections.Array<T>(godotObjects.Select(Bind<T>));
+                    return new Godot.Collections.Array<T>(godotObjects.Select({{MethodBind}}<T>));
                 }
                 
                 /// <summary>
                 /// Creates an instance of the GDExtension <typeparam name="T"/> type, and attaches the wrapper script to it.
                 /// </summary>
                 /// <returns>The wrapper instance linked to the underlying GDExtension type.</returns>
-                public static T {{CreateInstanceMethodName}}<T>(StringName className) where T : GodotObject
+                public static T {{MethodCreateInstance}}<T>(StringName className) where T : GodotObject
                 {
-                    return Bind<T>(ClassDB.Instantiate(className).As<GodotObject>());
+                    return {{MethodBind}}<T>(ClassDB.Instantiate(className).As<GodotObject>());
                 }
             }
             """;
 
-        return ($"_{STATIC_HELPER_CLASS}", sourceCode);
+        return ($"_{STATIC_HELPER}", sourceCode);
     }
     
     private static Dictionary<string, string> GetGodotSharpTypeNameMap()

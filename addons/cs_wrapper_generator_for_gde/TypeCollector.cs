@@ -24,15 +24,30 @@ internal static partial class TypeCollector
 #else
     public static readonly HashSet<string> BanClassType =
     [
+        "CanvasItemEditorSelectedItem",
         "CodeTextEditor",
         "ConnectionInfoDialog",
         "EditorPlainTextSyntaxHighlighter",
         "EditorStandardSyntaxHighlighter",
+        "EditorHelpBitTooltip",
+        "EditorInspectorSection",
+        "EditorPropertyArray",
+        "EditorPropertyArrayObject",
+        "EditorPropertyColor",
+        "EditorPropertyDictionary",
+        "EditorPropertyEnum",
+        "EditorPropertyFloat",
+        "EditorPropertyLayers",
+        "EditorPropertyLayersGrid",
+        "EditorPropertyNodePath",
+        "EditorPropertyTextEnum",
+        "EditorPropertyVector2",
         "FramebufferCacheRD",
         "GotoLineDialog",
         "RenderBufferCustomDataRD",
         "RenderBufferDataForwardClustered",
         "RenderBuffersGI",
+        "RenderSceneBuffersGLES3",
         "ScriptEditorQuickOpen",
         "ScriptTextEditor",
         "UniformSetCacheRD",
@@ -44,8 +59,8 @@ internal static partial class TypeCollector
     public static bool TryCollectGDExtensionTypes(out string[] gdeClassTypes, out ICollection<string> godotBuiltinTypeNames)
     {
         // The builtin types are obtained by creating & launching an empty project,
-        // and make the Godot Editor execute a custom GDScript that prints every types
-        // from the ClassDB, and parse the final StandardOutput when finish,
+        // and make the Godot Editor execute a custom GDScript that prints every type
+        // from the ClassDB, and parse the final StandardOutput when finished,
         // it's a dumb approach, but this is the only way we succeed.
         gdeClassTypes = null;
         godotBuiltinTypeNames = null;

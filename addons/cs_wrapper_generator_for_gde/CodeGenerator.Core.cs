@@ -5,27 +5,27 @@ using System.Linq;
 using System.Text;
 using System.Text.RegularExpressions;
 using Godot;
-using Godot.Collections;
 
 namespace GDExtensionAPIGenerator;
 
 internal static partial class CodeGenerator
 {
-    private static (string fileName, string fileContent) GenerateSourceCodeForType(
+    private static (string typeName, string code, List<CodeGenerator.GdType.EnumConstants> enums) GenerateSourceCodeForType(
         ClassInfo gdeTypeInfo,
         IReadOnlyDictionary<string, string> godotSharpTypeNameMap,
         IReadOnlyDictionary<string, ClassInfo> gdeTypeMap,
         ICollection<string> godotBuiltinClassNames,
         ConcurrentDictionary<string, string> enumNameToConstantMap)
     {
-        var builtCode = GenerateCode(
+        var (code, enums) = GenerateCode(
             gdeTypeInfo,
             gdeTypeMap,
             godotSharpTypeNameMap,
             godotBuiltinClassNames,
             enumNameToConstantMap
         );
-        return (gdeTypeInfo.TypeName, builtCode);
+
+        return (gdeTypeInfo.TypeName, code, enums);
     }
 
     private const string TAB1 = "    ";
@@ -35,13 +35,12 @@ internal static partial class CodeGenerator
     private const string TAB5 = TAB4 + TAB1;
     private const string TAB6 = TAB3 + TAB3;
     private const string NAMESPACE = "GDExtension.Wrappers";
-    private const string VariantToInstanceMethodName = "Bind";
-    private const string CastMethodName = "Cast";
-    private const string CreateInstanceMethodName = "Instantiate";
-    private const string VariantToGodotObject = "As<GodotObject>()";
+    private const string MethodCreateInstance = "Instantiate";
     private const string GDExtensionName = "GDExtensionName";
+    private const string MethodBind = "Bind";
+    private const string MethodCast = "Cast";
 
-    private static string GenerateCode(
+    private static (string code, List<CodeGenerator.GdType.EnumConstants> enums) GenerateCode(
         ClassInfo gdeTypeInfo,
         IReadOnlyDictionary<string, ClassInfo> gdeTypeMap,
         IReadOnlyDictionary<string, string> godotSharpTypeNameMap,
@@ -67,6 +66,7 @@ internal static partial class CodeGenerator
             $$"""
               using System;
               using Godot;
+              using Object = Godot.GodotObject;
 
               namespace {{NAMESPACE}};
 
@@ -74,16 +74,13 @@ internal static partial class CodeGenerator
               {
               {{TAB1}}public {{newKeyWord}}static readonly StringName {{GDExtensionName}} = "{{gdeTypeInfo.TypeName}}";
 
-              {{TAB1}}[Obsolete("Wrapper classes cannot be constructed with Ctor (it only instantiate the underlying {{engineBaseType}}), please use the {{CreateInstanceMethodName}}() method instead.")]
-              {{TAB1}}protected {{displayTypeName}}() { }
-
               {{TAB1}}/// <summary>
               {{TAB1}}/// Creates an instance of the GDExtension <see cref="{{displayTypeName}}"/> type, and attaches the wrapper script to it.
               {{TAB1}}/// </summary>
               {{TAB1}}/// <returns>The wrapper instance linked to the underlying GDExtension type.</returns>
-              {{TAB1}}public {{newKeyWord}}static {{displayTypeName}} {{CreateInstanceMethodName}}()
+              {{TAB1}}public {{newKeyWord}}static {{displayTypeName}} {{MethodCreateInstance}}()
               {{TAB1}}{
-              {{TAB2}}return {{STATIC_HELPER_CLASS}}.{{CreateInstanceMethodName}}<{{displayTypeName}}>({{GDExtensionName}});
+              {{TAB2}}return {{STATIC_HELPER}}.{{MethodCreateInstance}}<{{displayTypeName}}>({{GDExtensionName}});
               {{TAB1}}}
 
               {{TAB1}}/// <summary>
@@ -94,35 +91,34 @@ internal static partial class CodeGenerator
               {{TAB1}}/// <remarks>The developer should only supply the <paramref name="godotObject"/> that represents the correct underlying GDExtension type.</remarks>
               {{TAB1}}/// <param name="godotObject">The <paramref name="godotObject"/> that represents the correct underlying GDExtension type.</param>
               {{TAB1}}/// <returns>The existing or a new instance of the <see cref="{{displayTypeName}}"/> wrapper script attached to the supplied <paramref name="godotObject"/>.</returns>
-              {{TAB1}}public {{newKeyWord}}static {{displayTypeName}} {{VariantToInstanceMethodName}}(GodotObject godotObject)
+              {{TAB1}}public {{newKeyWord}}static {{displayTypeName}} {{MethodBind}}(GodotObject godotObject)
               {{TAB1}}{
-              {{TAB2}}return {{STATIC_HELPER_CLASS}}.{{VariantToInstanceMethodName}}<{{displayTypeName}}>(godotObject);
+              {{TAB2}}return {{STATIC_HELPER}}.{{MethodBind}}<{{displayTypeName}}>(godotObject);
               {{TAB1}}}
               """
         );
 
-        GenerateMembers(
+        var enums = GenerateMembers(
             codeBuilder,
             gdeTypeInfo,
             gdeTypeMap,
             godotSharpTypeNameMap,
             godotBuiltinClassNames,
-            enumNameToConstantMap,
-            string.Empty
+            enumNameToConstantMap
         );
 
-        return codeBuilder.Append('}').ToString();
+        var code = codeBuilder.Append('}').ToString();
+        return (code, enums);
     }
 
 
-    private static void GenerateMembers(
+    private static List<CodeGenerator.GdType.EnumConstants> GenerateMembers(
         StringBuilder codeBuilder,
         ClassInfo gdeTypeInfo,
         IReadOnlyDictionary<string, ClassInfo> gdeTypeMap,
         IReadOnlyDictionary<string, string> godotSharpTypeNameMap,
         ICollection<string> godotBuiltinClassNames,
-        ConcurrentDictionary<string, string> enumConstantMap,
-        string backingName
+        ConcurrentDictionary<string, string> enumConstantMap
     )
     {
         var propertyInfoList = CollectPropertyInfo(gdeTypeInfo);
@@ -135,9 +131,9 @@ internal static partial class CodeGenerator
         var propertiesBuilder = new StringBuilder();
         var methodsBuilder = new StringBuilder();
 
-        ConstructProperties(occupiedNames, propertyInfoList, godotSharpTypeNameMap, gdeTypeMap, propertiesBuilder, backingName);
-        ConstructMethods(occupiedNames, methodInfoList, godotSharpTypeNameMap, gdeTypeMap, godotBuiltinClassNames, methodsBuilder, gdeTypeInfo, backingName);
-        ConstructSignals(occupiedNames, signalInfoList, signalsBuilder, gdeTypeMap, godotSharpTypeNameMap, godotBuiltinClassNames, backingName);
+        ConstructProperties(occupiedNames, propertyInfoList, godotSharpTypeNameMap, gdeTypeMap, propertiesBuilder);
+        ConstructMethods(occupiedNames, methodInfoList, godotSharpTypeNameMap, gdeTypeMap, godotBuiltinClassNames, methodsBuilder, gdeTypeInfo);
+        ConstructSignals(occupiedNames, signalInfoList, signalsBuilder, gdeTypeMap, godotSharpTypeNameMap);
         ConstructEnums(occupiedNames, enumInfoList, enumsBuilder, gdeTypeInfo, enumConstantMap);
 
         codeBuilder
@@ -145,6 +141,31 @@ internal static partial class CodeGenerator
             .Append(propertiesBuilder)
             .Append(signalsBuilder)
             .Append(methodsBuilder);
+
+        var enums = new List<CodeGenerator.GdType.EnumConstants>();
+        foreach (var prop in propertyInfoList)
+            if (prop.GetGdType() is CodeGenerator.GdType.EnumConstants constants)
+                enums.Add(constants);
+
+        foreach (var method in methodInfoList)
+        {
+            if (method.ReturnValue.GetGdType() is CodeGenerator.GdType.EnumConstants constants) enums.Add(constants);
+
+            foreach (var argument in method.Arguments)
+                if (argument.GetGdType() is CodeGenerator.GdType.EnumConstants argConstants)
+                    enums.Add(argConstants);
+        }
+
+        foreach (var signal in signalInfoList)
+        {
+            if (signal.ReturnValue.GetGdType() is CodeGenerator.GdType.EnumConstants constants) enums.Add(constants);
+
+            foreach (var argument in signal.Arguments)
+                if (argument.GetGdType() is CodeGenerator.GdType.EnumConstants argConstants)
+                    enums.Add(argConstants);
+        }
+
+        return enums;
     }
 
     private const string UNRESOLVED_ENUM_HINT = "ENUM_HINT";
@@ -152,138 +173,6 @@ internal static partial class CodeGenerator
 
     [GeneratedRegex(@"<UNRESOLVED_ENUM_TYPE>(?<EnumConstants>.*)<\/UNRESOLVED_ENUM_TYPE>")]
     private static partial Regex GetExtractUnResolvedEnumValueRegex();
-
-
-    private readonly struct PropertyInfo
-    {
-        public readonly Variant.Type Type = Variant.Type.Nil;
-        public readonly string NativeName;
-        public readonly string ClassName;
-        public readonly PropertyHint Hint = PropertyHint.None;
-        public readonly string HintString;
-        public readonly PropertyUsageFlags Usage = PropertyUsageFlags.Default;
-        public readonly string TypeClass;
-
-        public PropertyInfo(Dictionary dictionary)
-        {
-            using var nameInfo = dictionary["name"];
-            using var classNameInfo = dictionary["class_name"];
-            using var typeInfo = dictionary["type"];
-            using var hintInfo = dictionary["hint"];
-            using var hintStringInfo = dictionary["hint_string"];
-            using var usageInfo = dictionary["usage"];
-
-            Type = typeInfo.As<Variant.Type>();
-            NativeName = nameInfo.AsString();
-            ClassName = classNameInfo.AsString();
-            Hint = hintInfo.As<PropertyHint>();
-            HintString = hintStringInfo.AsString();
-            Usage = usageInfo.As<PropertyUsageFlags>();
-            if (Hint is PropertyHint.Enum && Type is Variant.Type.Int)
-            {
-                var enumCandidates = HintString.Split(',', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries);
-                TypeClass = UNRESOLVED_ENUM_TEMPLATE.Replace(UNRESOLVED_ENUM_HINT, string.Join(',', enumCandidates));
-            }
-            else
-            {
-                TypeClass = ClassName;
-                if (string.IsNullOrEmpty(TypeClass)) TypeClass = IsArray && HintString.Contains(':') ? HintString[(HintString.IndexOf(':') + 1)..] : HintString;
-                if (string.IsNullOrEmpty(TypeClass)) TypeClass = nameof(Variant);
-            }
-        }
-
-        public bool IsGroupOrSubgroup => Usage.HasFlag(PropertyUsageFlags.Group) || Usage.HasFlag(PropertyUsageFlags.Subgroup);
-        public bool IsVoid => Type is Variant.Type.Nil;
-        public bool IsEnum => Hint is PropertyHint.Enum;
-        public bool IsArray => Hint is PropertyHint.ArrayType && Type == Variant.Type.Array;
-
-        public string GetTypeName() => VariantToTypeName(Type, Hint, TypeClass);
-
-        public string GetPropertyName() => EscapeAndFormatName(NativeName);
-
-        public string GetArgumentName() => EscapeAndFormatName(NativeName, true);
-
-#if GODOT4_4_OR_GREATER
-        public bool IsProperty(string methodName) => methodName == PropertyGetter || methodName == PropertySetter;
-        public string PropertyGetter => ClassDB.ClassGetPropertyGetter(ClassName, NativeName);
-        public string PropertySetter => ClassDB.ClassGetPropertySetter(ClassName, NativeName);
-        public override string ToString() =>
-            $"""
-             PropertyInfo:
-             {TAB1}{nameof(Type)}: {Type}
-             {TAB1}{nameof(NativeName)}: {NativeName}
-             {TAB1}{nameof(ClassName)}: {ClassName}
-             {TAB1}{nameof(Hint)}: {Hint}
-             {TAB1}{nameof(HintString)}: {HintString}
-             {TAB1}{nameof(Usage)}: {Usage}
-             {TAB1}{nameof(IsGroupOrSubgroup)}: {IsGroupOrSubgroup}
-             {TAB1}{nameof(IsVoid)}: {IsVoid}
-             {TAB1}{nameof(TypeClass)}: {TypeClass}
-             {TAB1}{nameof(PropertyGetter)}: {PropertyGetter}
-             {TAB1}{nameof(PropertySetter)}: {PropertySetter}
-             """;
-
-#else
-        public override string ToString() =>
-            $"""
-             PropertyInfo:
-             {TAB1}{nameof(Type)}: {Type}
-             {TAB1}{nameof(NativeName)}: {NativeName}
-             {TAB1}{nameof(ClassName)}: {ClassName}
-             {TAB1}{nameof(Hint)}: {Hint}
-             {TAB1}{nameof(HintString)}: {HintString}
-             {TAB1}{nameof(Usage)}: {Usage}
-             {TAB1}{nameof(IsGroupOrSubgroup)}: {IsGroupOrSubgroup}
-             {TAB1}{nameof(IsVoid)}: {IsVoid}
-             {TAB1}{nameof(TypeClass)}: {TypeClass}
-             """;
-#endif
-    }
-
-    private readonly struct MethodInfo
-    {
-        public readonly string NativeName;
-        public readonly PropertyInfo ReturnValue;
-        public readonly MethodFlags Flags;
-        public readonly int Id = 0;
-        public readonly PropertyInfo[] Arguments;
-        public readonly Variant[] DefaultArguments;
-
-        public MethodInfo(Dictionary dictionary)
-        {
-            using var nameInfo = dictionary["name"];
-            using var argsInfo = dictionary["args"];
-            using var defaultArgsInfo = dictionary["default_args"];
-            using var flagsInfo = dictionary["flags"];
-            using var idInfo = dictionary["id"];
-            using var returnInfo = dictionary["return"];
-
-            NativeName = nameInfo.AsString();
-            ReturnValue = new(returnInfo.As<Dictionary>());
-            Flags = flagsInfo.As<MethodFlags>();
-            Id = idInfo.AsInt32();
-            Arguments = argsInfo.As<Array<Dictionary>>().Select(x => new PropertyInfo(x)).ToArray();
-            DefaultArguments = defaultArgsInfo.As<Array<Variant>>().ToArray();
-        }
-
-        public string GetMethodName() => EscapeAndFormatName(NativeName);
-
-        public override string ToString() => $"""
-                                              MethodInfo;
-                                              {TAB1}{nameof(NativeName)}: {NativeName}, 
-                                              {TAB1}{nameof(ReturnValue)}: {ReturnValue}, 
-                                              {TAB1}{nameof(Flags)}: {Flags}, 
-                                              {TAB1}{nameof(Id)}: {Id}, 
-                                              {TAB1}{nameof(Arguments)}: 
-                                              {TAB1}[
-                                              {string.Join(",\n", Arguments.Select(x => TAB2 + x.ToString().ReplaceLineEndings($"\n{TAB2}")))}
-                                              {TAB1}], 
-                                              {TAB1}{nameof(DefaultArguments)}: 
-                                              {TAB1}[
-                                              {string.Join(",\n", DefaultArguments.Select(x => TAB2 + x.ToString().ReplaceLineEndings($"\n{TAB2}")))}
-                                              {TAB1}]
-                                              """;
-    }
 
     private static string GetEngineBaseType(ClassInfo gdeTypeInfo, ICollection<string> builtinTypes)
     {
@@ -294,79 +183,28 @@ internal static partial class CodeGenerator
         }
     }
 
-    private static void BuildupMethodArguments(StringBuilder stringBuilder, PropertyInfo[] propertyInfos, IReadOnlyDictionary<string, string> godotsharpTypeNameMap)
+    private static void BuildupMethodArguments(StringBuilder stringBuilder, Property[] propertyInfos,
+        IReadOnlyDictionary<string, string> godotsharpTypeNameMap)
     {
         for (var i = 0; i < propertyInfos.Length; i++)
         {
-            var propertyInfo = propertyInfos[i];
-            var typeName = propertyInfo.GetTypeName();
-            if (propertyInfo.IsVoid && propertyInfo.Usage.HasFlag(PropertyUsageFlags.NilIsVariant))
-            {
-                typeName = "Variant?";
-            }
-            else
-            {
-                typeName = godotsharpTypeNameMap.GetValueOrDefault(typeName, typeName);
-                if (propertyInfo.IsArray)
-                {
-                    typeName = typeName.Replace("Godot.GodotObject", godotsharpTypeNameMap.GetValueOrDefault(propertyInfo.TypeClass, propertyInfo.TypeClass));
-                }
-            }
-            stringBuilder
-                .Append(typeName)
-                .Append(' ')
-                .Append(propertyInfo.GetArgumentName());
+            if (i > 0) stringBuilder.Append(", ");
 
-            if (i != propertyInfos.Length - 1)
+            var propertyInfo = propertyInfos[i];
+            var typeKind = propertyInfo.GetGdType();
+
+            string argumentTypeName = typeKind switch
             {
-                stringBuilder.Append(", ");
-            }
+                CodeGenerator.GdType.BuiltIn or CodeGenerator.GdType.GdEnum or CodeGenerator.GdType.EnumConstants or CodeGenerator.GdType.GdObject or
+                    CodeGenerator.GdType.GdVariant or CodeGenerator.GdType.TypedArray or CodeGenerator.GdType.VariantArray
+                    => typeKind.CSharpTypeName(),
+                CodeGenerator.GdType.Void => throw new Exception($"Unexpected `void` type in method argument info.\nPropertyInfo: {propertyInfo}"),
+                _ => throw new Exception($"Unhandled type kind: {typeKind}")
+            };
+
+            stringBuilder.Append($"{argumentTypeName} {propertyInfo.GetArgumentName()}");
         }
     }
-
-    public static string VariantToTypeName(Variant.Type type, PropertyHint hint, string className) =>
-        type switch
-        {
-            Variant.Type.Aabb => "Aabb",
-            Variant.Type.Basis => "Basis",
-            Variant.Type.Callable => "Callable",
-            Variant.Type.Color => "Color",
-            Variant.Type.NodePath => "NodePath",
-            Variant.Type.Plane => "Plane",
-            Variant.Type.Projection => "Projection",
-            Variant.Type.Quaternion => "Quaternion",
-            Variant.Type.Rect2 => "Rect2",
-            Variant.Type.Rect2I => "Rect2I",
-            Variant.Type.Rid => "Rid",
-            Variant.Type.Signal => "Signal",
-            Variant.Type.StringName => "StringName",
-            Variant.Type.Transform2D => "Transform2D",
-            Variant.Type.Transform3D => "Transform3D",
-            Variant.Type.Vector2 => "Vector2",
-            Variant.Type.Vector2I => "Vector2I",
-            Variant.Type.Vector3 => "Vector3",
-            Variant.Type.Vector3I => "Vector3I",
-            Variant.Type.Vector4 => "Vector4",
-            Variant.Type.Vector4I => "Vector4I",
-            Variant.Type.Nil => "void",
-            Variant.Type.PackedByteArray => "byte[]",
-            Variant.Type.PackedInt32Array => "int[]",
-            Variant.Type.PackedInt64Array => "long",
-            Variant.Type.PackedFloat32Array => "float[]",
-            Variant.Type.PackedFloat64Array => "double[]",
-            Variant.Type.PackedStringArray => "string[]",
-            Variant.Type.PackedVector2Array => "Vector2[]",
-            Variant.Type.PackedVector3Array => "Vector3[]",
-            Variant.Type.PackedColorArray => "Color[]",
-            Variant.Type.Bool => "bool",
-            Variant.Type.Int => hint is not PropertyHint.Enum ? "int" : (string.IsNullOrWhiteSpace(className) ? "UNDEFINED_ENUM" : className),
-            Variant.Type.Float => "float",
-            Variant.Type.String => "string",
-            Variant.Type.Object => className,
-            Variant.Type.Dictionary => "Godot.Collections.Dictionary",
-            Variant.Type.Array => hint is PropertyHint.ArrayType ? $"Godot.Collections.Array<Godot.GodotObject>" : "Godot.Collections.Array",
-            _ => throw new ArgumentOutOfRangeException(nameof(type), type, null)
-        };
 
     [GeneratedRegex(@"[^a-zA-Z0-9_]")]
     private static partial Regex EscapeNameRegex();

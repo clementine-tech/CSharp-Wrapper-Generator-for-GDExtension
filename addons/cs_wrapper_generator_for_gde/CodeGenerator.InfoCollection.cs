@@ -7,20 +7,20 @@ namespace GDExtensionAPIGenerator;
 
 internal static partial class CodeGenerator
 {
-    private static IReadOnlyList<PropertyInfo> CollectPropertyInfo(ClassInfo gdeTypeInfo) =>
+    private static IReadOnlyList<Property> CollectPropertyInfo(ClassInfo gdeTypeInfo) =>
         ClassDB
             .ClassGetPropertyList(gdeTypeInfo.TypeName, true)
             .Select(
                 propertyDictionary =>
                 {
-                    var propertyInfo = new PropertyInfo(propertyDictionary);
+                    var propertyInfo = new Property(propertyDictionary);
                     propertyDictionary.Dispose();
                     return propertyInfo;
                 }
             )
             .ToArray();
 
-    private static IReadOnlyList<MethodInfo> CollectMethodInfo(ClassInfo gdeTypeInfo, IReadOnlyList<PropertyInfo> propertyInfos) =>
+    private static IReadOnlyList<MethodInfo> CollectMethodInfo(ClassInfo gdeTypeInfo, IReadOnlyList<Property> propertyInfos) =>
         ClassDB
             .ClassGetMethodList(gdeTypeInfo.TypeName, true)
             .Select(

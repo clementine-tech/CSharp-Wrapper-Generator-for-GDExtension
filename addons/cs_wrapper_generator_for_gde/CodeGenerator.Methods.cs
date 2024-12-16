@@ -1,4 +1,5 @@
-﻿using System.Collections.Generic;
+﻿using System;
+using System.Collections.Generic;
 using System.Text;
 using Godot;
 
@@ -12,16 +13,16 @@ internal static partial class CodeGenerator
         IReadOnlyDictionary<string, string> godotSharpTypeNameMap,
         IReadOnlyDictionary<string, ClassInfo> gdeTypeMap,
         ICollection<string> builtinTypeNames,
-        StringBuilder stringBuilder,
-        ClassInfo classInfo,
-        string backing
+        StringBuilder builder,
+        ClassInfo classInfo
     )
     {
         if (methodInfoList.Count == 0)
         {
             return;
         }
-        stringBuilder.AppendLine(
+
+        builder.AppendLine(
             """
             #region Methods
 
@@ -32,121 +33,89 @@ internal static partial class CodeGenerator
         foreach (var methodInfo in methodInfoList)
         {
             var methodNativeName = methodInfo.NativeName;
-            var returnValueName = methodInfo.ReturnValue.GetTypeName();
 
             var methodName = methodInfo.GetMethodName();
 
-            if (occupiedNames.Contains(methodName))
-            {
-                methodName += "Method";
-            }
-            else
-            {
-                occupiedNames.Add(methodName);
-            }
+            if (!occupiedNames.Add(methodName)) methodName += "Method";
 
-//              stringBuilder.AppendLine($"""
-//                                        /*
-//                                        {methodInfo}
-//                                        */
-//                                        """);
-            
-            stringBuilder
-                .Append($"{TAB1}public ");
+            builder.Append($"{TAB1}public ");
 
             var isVirtual = methodInfo.Flags.HasFlag(MethodFlags.Virtual);
             var isStatic = methodInfo.Flags.HasFlag(MethodFlags.Static);
-            
-            if (isStatic) stringBuilder.Append("static ");
-            if (isVirtual) stringBuilder.Append("virtual ");
-            
-            if (methodInfo.ReturnValue.IsArray)
-            {
-                returnValueName = returnValueName.Replace("Godot.GodotObject", godotSharpTypeNameMap.GetValueOrDefault(methodInfo.ReturnValue.TypeClass, methodInfo.ReturnValue.TypeClass));
-            }
-            
-            stringBuilder
-                .Append(returnValueName)
-                .Append(' ')
-                .Append(methodName)
-                .Append('(');
 
-            BuildupMethodArguments(stringBuilder, methodInfo.Arguments, godotSharpTypeNameMap);
+            if (isStatic) builder.Append("static ");
+            if (isVirtual) builder.Append("virtual ");
 
-            stringBuilder.Append(')');
-            
+            var returnType = methodInfo.ReturnValue.GetGdType();
+
+            builder.Append($"{returnType.CSharpTypeName()} {methodName}(");
+            BuildupMethodArguments(builder, methodInfo.Arguments, godotSharpTypeNameMap);
+            builder.AppendLine(") =>");
+            builder.Append($"{TAB2}");
+
             // TODO: VIRTUAL
-            
-            stringBuilder.Append(" => ");
-            
-            if (methodInfo.ReturnValue.IsArray && gdeTypeMap.ContainsKey(methodInfo.ReturnValue.TypeClass))
+
+            switch (returnType)
             {
-                stringBuilder.Append($"{STATIC_HELPER_CLASS}.{CastMethodName}<{methodInfo.ReturnValue.TypeClass}>(");
-            }
-            
-            if (!methodInfo.ReturnValue.IsVoid &&
-                gdeTypeMap.TryGetValue(methodInfo.ReturnValue.ClassName, out var returnTypeInfo))
-            {
-                stringBuilder.Append($"{STATIC_HELPER_CLASS}.{VariantToInstanceMethodName}<{returnTypeInfo.TypeName}>(");
+                case GdType.GdObject(var className) when gdeTypeMap.ContainsKey(className):
+                {
+                    builder.Append($"{STATIC_HELPER}.{MethodBind}<{className}>(");
+                    AppendCallInvocation();
+                    builder.Append(".As<Object>())");
+                    break;
+                }
+                case GdType.TypedArray(var itemType) when gdeTypeMap.ContainsKey(itemType.CSharpTypeName()):
+                {
+                    builder.Append($"{STATIC_HELPER}.{MethodCast}<{itemType.CSharpTypeName()}>(");
+                    AppendCallInvocation();
+                    builder.Append(".As<Godot.Collections.Array<Object>>())");
+                    break;
+                }
+                case GdType.GdObject:
+                case GdType.TypedArray:
+                case GdType.BuiltIn:
+                case GdType.GdEnum:
+                case GdType.EnumConstants:
+                case GdType.GdVariant:
+                case GdType.VariantArray:
+                {
+                    AppendCallInvocation();
+                    builder.Append($".As<{returnType.CSharpTypeName()}>()");
+                    break;
+                }
+                case GdType.Void:
+                    AppendCallInvocation();
+                    break;
+                default:
+                    throw new Exception($"Unhandled type kind: {returnType}");
             }
 
-            if (isStatic)
-            {
-                stringBuilder
-                    .Append($"{STATIC_HELPER_CLASS}.")
-                    .Append("Call(\"")
-                    .Append(classInfo.TypeName)
-                    .Append("\", \"")
-                    .Append(methodNativeName)
-                    .Append('"');
-            }
-            else
-            {
-                stringBuilder
-                    .Append(backing)
-                    .Append("Call(\"")
-                    .Append(methodNativeName)
-                    .Append('"');
-            }
+            // TODO: var isVararg = methodInfo.Flags.HasFlag(MethodFlags.Vararg);
 
-            if (methodInfo.Arguments.Length > 0)
+            builder.AppendLine(";").AppendLine();
+            continue;
+
+            void AppendCallInvocation()
             {
-                stringBuilder.Append(", ");
+                if (isStatic)
+                    builder.Append($"{STATIC_HELPER}.Call(\"{classInfo.TypeName}\", \"{methodNativeName}\"");
+                else
+                    builder.Append($"Call(\"{methodNativeName}\"");
+
                 BuildupMethodCallArguments(
-                    stringBuilder,
+                    builder,
                     methodInfo.Arguments,
                     gdeTypeMap,
                     godotSharpTypeNameMap,
                     builtinTypeNames
                 );
-            }
-            
-            // TODO: var isVararg = methodInfo.Flags.HasFlag(MethodFlags.Vararg);
 
-            stringBuilder.Append(')');
-
-            if (!methodInfo.ReturnValue.IsVoid)
-            {
-                if (gdeTypeMap.TryGetValue(methodInfo.ReturnValue.ClassName, out returnTypeInfo))
-                {
-                    stringBuilder.Append($".{VariantToGodotObject})");
-                }
-                else
-                {
-                    stringBuilder.Append($".As<{methodInfo.ReturnValue.GetTypeName()}>()");
-                }
+                builder.Append(')');
             }
-            
-            if (methodInfo.ReturnValue.IsArray)
-            {
-                stringBuilder.Append(')');
-            }
-            
-            stringBuilder.AppendLine(";").AppendLine();
         }
 
 
-        stringBuilder.AppendLine(
+        builder.AppendLine(
             """
             #endregion
 
@@ -155,51 +124,47 @@ internal static partial class CodeGenerator
     }
 
     private static void BuildupMethodCallArguments(
-        StringBuilder stringBuilder,
-        PropertyInfo[] propertyInfos,
+        StringBuilder builder,
+        Property[] propertyInfos,
         IReadOnlyDictionary<string, ClassInfo> gdeTypeMap,
-        IReadOnlyDictionary<string, string> godotsharpTypeMap,
+        IReadOnlyDictionary<string, string> godotSharpTypeMap,
         ICollection<string> builtinTypes
     )
     {
-        for (var i = 0; i < propertyInfos.Length; i++)
+        foreach (Property propertyInfo in propertyInfos)
         {
-            var propertyInfo = propertyInfos[i];
-
-            var propertyTypeName = propertyInfo.GetTypeName();
-            
-            if (gdeTypeMap.TryGetValue(propertyTypeName, out var gdeClassInfo))
-            {
-                var bassType = GetEngineBaseType(gdeClassInfo, builtinTypes);
-                bassType = godotsharpTypeMap.GetValueOrDefault(bassType, bassType);
-                stringBuilder.Append($"({bassType})");
-            }
+            builder.Append(", ");
+            var type = propertyInfo.GetGdType();
             var argumentName = propertyInfo.GetArgumentName();
-            
-            if (propertyInfo.IsVoid && propertyInfo.Usage.HasFlag(PropertyUsageFlags.NilIsVariant))
+
+            switch (type)
             {
-                stringBuilder
-                    .Append(argumentName)
-                    .Append(" ?? new Variant()");
-            }
-            else if (propertyInfo.IsEnum)
-            {
-                stringBuilder
-                    .Append("Variant.From<")
-                    .Append(propertyTypeName)
-                    .Append(">(")
-                    .Append(argumentName)
-                    .Append(')');
-            }
-            else
-            {
-                stringBuilder.Append(argumentName);
-            }
-            
-            
-            if (i != propertyInfos.Length - 1)
-            {
-                stringBuilder.Append(", ");
+                case GdType.GdObject(var className) when gdeTypeMap.TryGetValue(className, out var gdeClassInfo):
+                {
+                    var baseType = GetEngineBaseType(gdeClassInfo, builtinTypes);
+                    var typeName = godotSharpTypeMap.GetValueOrDefault(baseType) ?? baseType;
+                    builder.Append($"({typeName}) {argumentName}");
+                    break;
+                }
+                case GdType.GdEnum(var name):
+                    builder.Append($"Variant.From<{name}>({argumentName})");
+                    break;
+                case GdType.EnumConstants:
+                    builder.Append($"Variant.From<Int64>({argumentName} as Int64)");
+                    break;
+                case GdType.GdVariant:
+                    builder.Append($"{argumentName}");
+                    break;
+                case GdType.GdObject:
+                case GdType.BuiltIn:
+                case GdType.TypedArray:
+                case GdType.VariantArray:
+                    builder.Append(argumentName);
+                    break;
+                case GdType.Void:
+                    throw new ArgumentException("Unexpected `void` type in method argument info.");
+                default:
+                    throw new Exception($"Unhandled type kind: {type}");
             }
         }
     }

@@ -1,4 +1,5 @@
-﻿using System.Collections.Generic;
+﻿using System;
+using System.Collections.Generic;
 using System.Text;
 using Godot;
 
@@ -7,56 +8,44 @@ namespace GDExtensionAPIGenerator;
 internal static partial class CodeGenerator
 {
     private static void ConstructSignals(
-        ICollection<string> occupiedNames,
+        HashSet<string> occupiedNames,
         IReadOnlyList<MethodInfo> signalList,
-        StringBuilder codeBuilder,
+        StringBuilder builder,
         IReadOnlyDictionary<string, ClassInfo> gdeTypeMap,
-        IReadOnlyDictionary<string, string> godotSharpTypeNameMap,
-        ICollection<string> builtinTypes,
-        string backingName
+        IReadOnlyDictionary<string, string> godotSharpTypeNameMap
     )
     {
-        if (signalList.Count != 0)
-        {
-            codeBuilder.AppendLine(
-                """
-                #region Signals
+        if (signalList.Count == 0) return;
 
-                """
-            );
-        }
+        builder.AppendLine(
+            """
+            #region Signals
+
+            """
+        );
 
         foreach (var signalInfo in signalList)
         {
-            var returnValueName = signalInfo.ReturnValue.GetTypeName();
-
             var signalName = signalInfo.GetMethodName();
 
-            if (occupiedNames.Contains(signalName))
-            {
-                signalName += "Signal";
-            }
-            else
-            {
-                occupiedNames.Add(signalName);
-            }
+            if (!occupiedNames.Add(signalName)) signalName += "Signal";
 
             var signalDelegateName = $"{signalName}Handler";
             var signalNameCamelCase = ToCamelCase(signalName);
             var backingDelegateName = $"_{signalNameCamelCase}_backing";
             var backingCallableName = $"_{signalNameCamelCase}_backing_callable";
 
-            codeBuilder.Append($"{TAB1}public delegate {returnValueName} {signalDelegateName}(");
+            var returnType = signalInfo.ReturnValue.GetGdType();
+            var returnTypeName = returnType.CSharpTypeName();
 
-            BuildupMethodArguments(codeBuilder, signalInfo.Arguments, godotSharpTypeNameMap);
-
-            codeBuilder
-                .AppendLine(");")
-                .AppendLine();
+            builder.Append($"{TAB1}public delegate {returnTypeName} {signalDelegateName}(");
+            BuildupMethodArguments(builder, signalInfo.Arguments, godotSharpTypeNameMap);
+            builder.AppendLine(");");
+            builder.AppendLine();
 
             const string callableName = nameof(Callable);
 
-            codeBuilder.Append(
+            builder.Append(
                 $$"""
                   {{TAB1}}private {{signalDelegateName}} {{backingDelegateName}};
                   {{TAB1}}private {{callableName}} {{backingCallableName}};
@@ -72,21 +61,28 @@ internal static partial class CodeGenerator
 
             var argumentsLength = signalInfo.Arguments.Length;
 
-            if (argumentsLength > 0) codeBuilder.Append('<');
-
-            for (var i = 0; i < argumentsLength; i++)
+            if (argumentsLength <= 0)
             {
-                codeBuilder.Append(nameof(Variant));
-
-                if (i != argumentsLength - 1)
-                {
-                    codeBuilder.Append(", ");
-                }
+                builder.AppendLine(
+                    $$"""
+                      (
+                      {{TAB5}}() =>
+                      {{TAB5}}{
+                      {{TAB6}}{{backingDelegateName}}?.Invoke();
+                      """
+                );
+                AppendAfterArguments();
+                continue;
             }
 
-            if (argumentsLength > 0) codeBuilder.Append('>');
+            builder.Append('<');
 
-            codeBuilder.Append(
+            builder.Append(nameof(Variant));
+            for (var i = 1; i < argumentsLength; i++) builder.Append($", {nameof(Variant)}");
+
+            builder.Append('>');
+
+            builder.Append(
                 $"""
                  (
                  {TAB5}(
@@ -100,17 +96,10 @@ internal static partial class CodeGenerator
 
             static string Arg(int index) => $"{argPrefix}{index}";
 
-            for (var i = 0; i < argumentsLength; i++)
-            {
-                codeBuilder.Append(UnmanagedArg(i));
+            builder.Append(UnmanagedArg(0));
+            for (var i = 1; i < argumentsLength; i++) builder.Append($", {UnmanagedArg(i)}");
 
-                if (i != argumentsLength - 1)
-                {
-                    codeBuilder.Append(", ");
-                }
-            }
-
-            codeBuilder.AppendLine(
+            builder.AppendLine(
                 $$"""
                   ) =>
                   {{TAB5}}{
@@ -119,48 +108,54 @@ internal static partial class CodeGenerator
 
             for (var index = 0; index < signalInfo.Arguments.Length; index++)
             {
-                var argumentInfo = signalInfo.Arguments[index];
+                Property argumentInfo = signalInfo.Arguments[index];
                 var variantArgName = UnmanagedArg(index);
                 var convertedArgName = Arg(index);
-                var argumentType = argumentInfo.GetTypeName();
-                argumentType = godotSharpTypeNameMap.GetValueOrDefault(argumentType, argumentType);
-                codeBuilder.Append($"{TAB6}var {convertedArgName} = ");
-                if (gdeTypeMap.ContainsKey(argumentType))
-                    codeBuilder.AppendLine($"{STATIC_HELPER_CLASS}.{VariantToInstanceMethodName}<{argumentType}>({variantArgName}.As<GodotObject>());");
-                else
+                builder.Append($"{TAB6}var {convertedArgName} = ");
+
+                var argumentKind = argumentInfo.GetGdType();
+                switch (argumentKind)
                 {
-                    if (argumentInfo.IsArray)
-                    {
-                        var typeClass = godotSharpTypeNameMap.GetValueOrDefault(argumentInfo.TypeClass, argumentInfo.TypeClass);
-                        if (gdeTypeMap.ContainsKey(typeClass))
-                            codeBuilder.AppendLine($"{STATIC_HELPER_CLASS}.{CastMethodName}<{typeClass}>({variantArgName}.As<Godot.Collections.Array<Godot.GodotObject>>());");
-                        else
-                            codeBuilder.AppendLine($"{variantArgName}.As<Godot.Collections.Array<{typeClass}>>());");
-                    }
-                    else
-                      codeBuilder.AppendLine($"{variantArgName}.As<{argumentType}>();");
+                    case GdType.GdObject(var className) when gdeTypeMap.ContainsKey(className):
+                        builder.AppendLine($"{STATIC_HELPER}.{MethodBind}<{className}>({variantArgName}.As<Object>());");
+                        break;
+                    case GdType.TypedArray(var itemType) when gdeTypeMap.ContainsKey(itemType.CSharpTypeName()):
+                        builder.AppendLine(
+                            $"{STATIC_HELPER}.{MethodCast}<{itemType.CSharpTypeName()}>({variantArgName}.As<Godot.Collections.Array<Object>>());"
+                        );
+                        break;
+                    case GdType.GdObject:
+                    case GdType.TypedArray:
+                    case GdType.BuiltIn:
+                    case GdType.GdEnum:
+                    case GdType.EnumConstants:
+                    case GdType.GdVariant:
+                    case GdType.VariantArray:
+                        builder.AppendLine($"{variantArgName}.As<{argumentKind.CSharpTypeName()}>();");
+                        break;
+                    case GdType.Void:
+                        throw new Exception($"Unexpected `void` type in signal argument info.\nSignalInfo: {signalInfo}");
+                    default:
+                        throw new Exception($"Unhandled type kind: {argumentKind}");
                 }
             }
 
-            codeBuilder.Append($"{TAB6}{backingDelegateName}?.Invoke(");
+            builder.Append($"{TAB6}{backingDelegateName}?.Invoke(");
 
-            for (var i = 0; i < argumentsLength; i++)
+            builder.Append(Arg(0));
+            for (var i = 1; i < argumentsLength; i++) builder.Append($", {Arg(i)}");
+
+            builder.AppendLine(");");
+            AppendAfterArguments();
+            continue;
+
+            void AppendAfterArguments()
             {
-                codeBuilder.Append(Arg(i));
-
-                if (i != argumentsLength - 1)
-                {
-                    codeBuilder.Append(", ");
-                }
-            }
-
-            codeBuilder.AppendLine(");");
-
-            codeBuilder.AppendLine(
+                builder.AppendLine(
                     $$"""
                       {{TAB5}}}
                       {{TAB4}});
-                      {{TAB4}}{{backingName}}Connect("{{signalInfo.NativeName}}", {{backingCallableName}});
+                      {{TAB4}}Connect("{{signalInfo.NativeName}}", {{backingCallableName}});
                       {{TAB3}}}
                       {{TAB3}}{{backingDelegateName}} += value;
                       {{TAB2}}}
@@ -170,24 +165,22 @@ internal static partial class CodeGenerator
                       {{TAB3}}
                       {{TAB3}}if({{backingDelegateName}} == null)
                       {{TAB3}}{
-                      {{TAB4}}{{backingName}}Disconnect("{{signalInfo.NativeName}}", {{backingCallableName}});
+                      {{TAB4}}Disconnect("{{signalInfo.NativeName}}", {{backingCallableName}});
                       {{TAB4}}{{backingCallableName}} = default;
                       {{TAB3}}}
                       {{TAB2}}}
                       {{TAB1}}}
                       """
-                )
-                .AppendLine();
+                );
+                builder.AppendLine();
+            }
         }
 
-        if (signalList.Count != 0)
-        {
-            codeBuilder.AppendLine(
-                """
-                #endregion
+        builder.AppendLine(
+            """
+            #endregion
 
-                """
-            );
-        }
+            """
+        );
     }
 }

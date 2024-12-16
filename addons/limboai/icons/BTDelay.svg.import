@@ -2,9 +2,10 @@
 
 importer="texture"
 type="CompressedTexture2D"
-uid="uid://bqhq0wxl2wwq8"
+uid="uid://ya1srvrnvdpq"
 path="res://.godot/imported/BTDelay.svg-1eb814224ebee27c668e10a73d85b845.ctex"
 metadata={
+"has_editor_variant": true,
 "vram_texture": false
 }
 
@@ -33,5 +34,5 @@ process/hdr_clamp_exposure=false
 process/size_limit=0
 detect_3d/compress_to=1
 svg/scale=1.0
-editor/scale_with_editor_scale=false
-editor/convert_colors_with_editor_theme=false
+editor/scale_with_editor_scale=true
+editor/convert_colors_with_editor_theme=true

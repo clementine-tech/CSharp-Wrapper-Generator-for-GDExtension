@@ -1,18 +1,17 @@
-﻿using System.Collections.Generic;
+﻿using System;
+using System.Collections.Generic;
 using System.Text;
-using Godot;
 
 namespace GDExtensionAPIGenerator;
 
 internal static partial class CodeGenerator
 {
     private static void ConstructProperties(
-        ICollection<string> occupiedNames,
-        IReadOnlyList<PropertyInfo> propertyInfos,
+        HashSet<string> occupiedNames,
+        IReadOnlyList<Property> propertyInfos,
         IReadOnlyDictionary<string, string> godotSharpTypeNameMap,
         IReadOnlyDictionary<string, ClassInfo> gdeTypeMap,
-        StringBuilder stringBuilder,
-        string backing
+        StringBuilder builder
     )
     {
         if (propertyInfos.Count == 0)
@@ -20,7 +19,7 @@ internal static partial class CodeGenerator
             return;
         }
 
-        stringBuilder.AppendLine(
+        builder.AppendLine(
             """
             #region Properties
 
@@ -31,61 +30,75 @@ internal static partial class CodeGenerator
         {
             if (propertyInfo.IsGroupOrSubgroup) continue;
 
-            var typeName = propertyInfo.GetTypeName();
-
-            typeName = godotSharpTypeNameMap.GetValueOrDefault(typeName, typeName);
-
             var propertyName = propertyInfo.GetPropertyName();
 
-            if (occupiedNames.Contains(propertyName))
+            if (!occupiedNames.Add(propertyName)) propertyName += "Property";
+
+            var type = propertyInfo.GetGdType();
+            var typeName = type.CSharpTypeName();
+            var defaultGetter = DefaultGetter();
+            switch (type)
             {
-                propertyName += "Property";
-            }
-            else
-            {
-                occupiedNames.Add(propertyName);
+                case GdType.GdVariant:
+                case GdType.Void:
+                {
+                    if (type is GdType.Void)
+                    {
+                        Godot.GD.PushWarning($"Found `void` type in property info, should be `Variant`, using Variant instead.\n" +
+                                             $"Property: {propertyInfo}");
+                    }
+
+                    builder
+                        .AppendLine($"{TAB1}public Variant {propertyName}")
+                        .AppendLine($"{TAB1}{{")
+                        .AppendLine(
+                            $$"""{{TAB2}}get => Get("{{propertyInfo.NativeName}}") is { VariantType: not Variant.Type.Nil } _result ? _result : default;""")
+                        .AppendLine(
+                            $"""{TAB2}set => Set("{propertyInfo.NativeName}", value);""")
+                        .AppendLine($"{TAB1}}}")
+                        .AppendLine();
+                    break;
+                }
+                case GdType.GdEnum:
+                case GdType.EnumConstants:
+                    AppendNonVariantProperty($"{defaultGetter}.As<Int64>()");
+                    break;
+                case GdType.TypedArray(var itemType):
+                {
+                    var getter = gdeTypeMap.ContainsKey(itemType.CSharpTypeName())
+                        ? $"{STATIC_HELPER}.{MethodCast}<{itemType}>({defaultGetter})"
+                        : defaultGetter;
+                    AppendNonVariantProperty(getter);
+                    break;
+                }
+                case GdType.BuiltIn:
+                case GdType.GdObject:
+                case GdType.VariantArray:
+                    AppendNonVariantProperty();
+                    break;
+                default:
+                    throw new Exception($"Unhandled type kind: {type}");
             }
 
-//             stringBuilder.AppendLine($"""
-//                                       /*
-//                                       {propertyInfo}
-//                                       */
-//                                       """
-//                                       );
+            continue;
 
-            if (propertyInfo.IsVoid)
+            void AppendNonVariantProperty(string getter = null)
             {
-                //   get => Get("saved_value") is { VariantType: not Variant.Type.Nil } _result ? _result : (Variant?)null;
-                //   set => {backing}Set("{propertyInfo.NativeName}", value is not null ? Variant.From(value) : new Variant());
-                stringBuilder
-                    .AppendLine($"{TAB1}public Variant? {propertyName}")
+                getter ??= defaultGetter;
+
+                builder
+                    .AppendLine($"{TAB1}public {typeName} {propertyName}")
                     .AppendLine($"{TAB1}{{")
-                    .AppendLine($$"""{{TAB2}}get => {{backing}}Get("{{propertyInfo.NativeName}}") is { VariantType: not Variant.Type.Nil } _result ? _result : (Variant?)null;""")
-                    .AppendLine($"""{TAB2}set => {backing}Set("{propertyInfo.NativeName}", value is not null ? Variant.From(value) : new Variant());""")
+                    .AppendLine($"""{TAB2}get => {getter};""")
+                    .AppendLine($"""{TAB2}set => Set("{propertyInfo.NativeName}", Variant.From(value));""")
                     .AppendLine($"{TAB1}}}")
                     .AppendLine();
-                
-                continue;
             }
-            var enumString = propertyInfo.IsEnum && propertyInfo.Type == Variant.Type.Int ? ".As<Int64>()" : string.Empty;
-            var castTypeName =  typeName;
-            var getter = $"({castTypeName}){backing}Get(\"{propertyInfo.NativeName}\"){enumString}";
-            if (propertyInfo.IsArray)
-            {
-                var typeClass = godotSharpTypeNameMap.GetValueOrDefault(propertyInfo.TypeClass, propertyInfo.TypeClass);
-                typeName = typeName.Replace("Godot.GodotObject", typeClass);
-                getter = gdeTypeMap.ContainsKey(typeClass) ? $"{STATIC_HELPER_CLASS}.{CastMethodName}<{typeClass}>({getter})" : getter.Replace("Godot.GodotObject", typeClass);
-            }
-            stringBuilder
-                .AppendLine($"{TAB1}public {typeName} {propertyName}")
-                .AppendLine($"{TAB1}{{")
-                .AppendLine($"""{TAB2}get => {getter};""")
-                .AppendLine($"""{TAB2}set => {backing}Set("{propertyInfo.NativeName}", Variant.From(value));""")
-                .AppendLine($"{TAB1}}}")
-                .AppendLine();
+
+            string DefaultGetter() => $"({typeName}) Get(\"{propertyInfo.NativeName}\")";
         }
 
-        stringBuilder.AppendLine(
+        builder.AppendLine(
             """
             #endregion
 

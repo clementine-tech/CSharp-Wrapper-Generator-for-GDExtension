@@ -5,14 +5,14 @@ namespace GDExtensionAPIGenerator;
 
 internal static class FileWriter
 {
-    internal static void WriteResult(IReadOnlyList<(string fileName, string fileContent)> codes)
+    internal static void WriteResult(IReadOnlyList<(string filePath, string fileContent)> filesToCreate)
     {
         DirAccess.MakeDirAbsolute(GeneratorMain.WRAPPERS_PATH);
         
-        foreach (var (fileName, fileContent) in codes)
+        foreach (var (filePath, fileContent) in filesToCreate)
         {
-            if(fileContent is null) continue;
-            using var fileAccess = FileAccess.Open(GeneratorMain.GetWrapperPath(fileName), FileAccess.ModeFlags.Write);
+            if (fileContent is null) continue;
+            using var fileAccess = FileAccess.Open(filePath, FileAccess.ModeFlags.Write);
             fileAccess.StoreString(fileContent);
         }
 
