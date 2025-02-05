@@ -46,6 +46,7 @@ internal static partial class TypeCollector
 		"EditorPropertyVectorN",
 		"FramebufferCacheRD",
 		"GotoLineDialog",
+		"PhysicsDirectSpaceState3D",
 		"RenderBufferCustomDataRD",
 		"RenderBufferDataForwardClustered",
 		"RenderBuffersGI",
