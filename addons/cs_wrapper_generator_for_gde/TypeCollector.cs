@@ -30,6 +30,7 @@ internal static partial class TypeCollector
 		"EditorStandardSyntaxHighlighter",
 		"EditorHelpBitTooltip",
 		"EditorInspectorSection",
+		"EditorPropertyAABB",
 		"EditorPropertyArray",
 		"EditorPropertyArrayObject",
 		"EditorPropertyColor",
