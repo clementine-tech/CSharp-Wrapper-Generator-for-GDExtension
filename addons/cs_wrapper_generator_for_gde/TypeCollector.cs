@@ -55,6 +55,7 @@ internal static partial class TypeCollector
         "FindBar",
         "GodotPhysicsDirectSpaceState2D",
         "NativeMenuWindows",
+		"NativeMenuMacOS",
     ];
     public static bool TryCollectGDExtensionTypes(out string[] gdeClassTypes, out ICollection<string> godotBuiltinTypeNames)
     {
