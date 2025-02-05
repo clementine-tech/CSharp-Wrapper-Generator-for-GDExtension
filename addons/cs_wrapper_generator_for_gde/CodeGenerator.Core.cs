@@ -33,6 +33,7 @@ internal static partial class CodeGenerator {
 	private const string TAB4 = TAB2 + TAB2;
 	private const string TAB5 = TAB4 + TAB1;
 	private const string TAB6 = TAB3 + TAB3;
+	private const string MethodCreateInstance = "Instantiate";
 	private const string NAMESPACE = "GDExtension.Wrappers";
 	private const string GDExtensionName = "GDExtensionName";
 	private const string MethodBind = "Bind";
@@ -72,6 +73,15 @@ internal static partial class CodeGenerator {
 			public {{abstractKeyWord}}partial class {{displayTypeName}} : {{displayParentTypeName}}
 			{
 			{{TAB1}}public {{newKeyWord}}static readonly StringName {{GDExtensionName}} = "{{gdeTypeInfo.TypeName}}";
+			
+			{{TAB1}}/// <summary>
+			{{TAB1}}/// Creates an instance of the GDExtension <see cref="{{displayTypeName}}"/> type, and attaches the wrapper script to it.
+			{{TAB1}}/// </summary>
+			{{TAB1}}/// <returns>The wrapper instance linked to the underlying GDExtension type.</returns>
+			{{TAB1}}public {{newKeyWord}}static {{displayTypeName}} {{MethodCreateInstance}}()
+			{{TAB1}}{
+			{{TAB2}}return {{STATIC_HELPER}}.{{MethodCreateInstance}}<{{displayTypeName}}>({{GDExtensionName}});
+			{{TAB1}}}
 
 			{{TAB1}}/// <summary>
 			{{TAB1}}/// Try to cast the script on the supplied <paramref name="godotObject"/> to the <see cref="{{displayTypeName}}"/> wrapper type,

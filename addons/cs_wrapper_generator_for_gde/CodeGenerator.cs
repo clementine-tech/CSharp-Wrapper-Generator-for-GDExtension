@@ -187,6 +187,15 @@ internal static partial class CodeGenerator {
 			    {
 			        return new Godot.Collections.Array<T>(godotObjects.Select({{MethodBind}}<T>));
 			    }
+			    
+			    /// <summary>
+				/// Creates an instance of the GDExtension <typeparam name="T"/> type, and attaches the wrapper script to it.
+				/// </summary>
+				/// <returns>The wrapper instance linked to the underlying GDExtension type.</returns>
+				public static T {{MethodCreateInstance}}<T>(StringName className) where T : GodotObject
+				{
+				    return {{MethodBind}}<T>(ClassDB.Instantiate(className).As<GodotObject>());
+				}
 			}
 			""";
 
