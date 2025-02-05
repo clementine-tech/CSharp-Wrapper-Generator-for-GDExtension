@@ -51,6 +51,7 @@ internal static partial class TypeCollector
 		"RenderSceneBuffersGLES3",
 		"ScriptEditorQuickOpen",
 		"ScriptTextEditor",
+		"SDFGI",
 		"UniformSetCacheRD",
 		"EditorHelp",
 		"FindBar",

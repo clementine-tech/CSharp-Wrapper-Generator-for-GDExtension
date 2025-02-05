@@ -65,6 +65,7 @@ internal static partial class CodeGenerator {
 			using System;
 			using Godot;
 			using Object = Godot.GodotObject;
+			using Dictionary = Godot.Collections.Dictionary;
 
 			namespace {{NAMESPACE}};
 
